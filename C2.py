@@ -10,6 +10,8 @@ import torchvision.transforms as T
 import torchvision
 import torch.nn as nn
 
+import argparse
+parser = argparse.ArgumentParser()
 
 # In[2]:
 
@@ -25,11 +27,16 @@ wandb.login()
 
 # In[4]:
 
+parser.add_argument("--weight_decay", type=float, default=0.0)
+parser.add_argument("--dropout", type=float, default=0.0)
+args = parser.parse_args()
+print(args)
 
 learning_rate = 0.001
 epochs = 90
 num_hidden_layers = 3
-hidden_layer_sizes = [1000,800,800]
+hidden_layer_sizes = [int(1000//args.dropout),int(800//args.dropout),int(800//args.dropout)]
+print(hidden_layer_sizes)
 optimizer = "Adam"
 loss = "cross-entropy"
 architecture = "MLP"
@@ -37,21 +44,24 @@ run = "1"
 dataset = "CIFAR-10"
 batch_size = 32
 
+
 wandb.init(
     project="SMAI-Project", 
     name=f"experiment_{architecture}_{dataset} {run}",
-      # Track hyperparameters and run metadata
-      config={
-      "learning_rate": learning_rate,
-      "architecture": architecture,
-      "dataset": dataset,
-      "epochs": epochs,
-      "num_hidden_layers":num_hidden_layers,
-      "hidden_layer_sizes" : hidden_layer_sizes,
-      "optimizer":optimizer,
-      "loss":loss,
-      "batch_size":batch_size
-      })
+    # Track hyperparameters and run metadata
+    config={
+    "learning_rate": learning_rate,
+    "architecture": architecture,
+    "dataset": dataset,
+    "epochs": epochs,
+    "num_hidden_layers":num_hidden_layers,
+    "hidden_layer_sizes" : hidden_layer_sizes,
+    "optimizer":optimizer,
+    "loss":loss,
+    "batch_size":batch_size,
+    "weight_decay":args.weight_decay,
+    "dropout":args.dropout
+    })
 
 
 # In[5]:
@@ -73,7 +83,7 @@ train_transform = T.Compose([
                 T.RandomCrop(32,padding=4),
                 T.RandomHorizontalFlip(),
                 T.ToTensor(),
-                T.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261)), # mean values and stds of RGB channels om cifar10
+                T.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261)), # mean values and stds of RGB channels on cifar10
             ])
 test_transform = T.Compose([
     T.ToTensor(),
@@ -84,12 +94,12 @@ test_transform = T.Compose([
 trainset = torchvision.datasets.CIFAR10(root='./cifar10', train=True,
                                         download=True, transform=train_transform)
 trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size,
-                                          shuffle=True, num_workers=2)
+                                          shuffle=True, num_workers=1)
 
 testset = torchvision.datasets.CIFAR10(root='./cifar10', train=False,
                                        download=True, transform=test_transform)
 testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size,
-                                         shuffle=False, num_workers=2)
+                                         shuffle=False, num_workers=1)
 
 
 classes = ('plane', 'car', 'bird', 'cat',
@@ -112,9 +122,11 @@ def mlp( n , p , hidden_layer_sizes , num_hidden_layers):
   model = nn.Sequential()
   model.add_module('input', nn.Linear(n,hidden_layer_sizes[0]))
   model.add_module('relu0', nn.ReLU())
+  model.add_module('dropout0', nn.Dropout(p=args.dropout))
   for i in range(1,num_hidden_layers):
     model.add_module(f'hidden{i}', nn.Linear(hidden_layer_sizes[i-1],hidden_layer_sizes[i]))
     model.add_module(f'relu{i}', nn.ReLU())
+    model.add_module(f'dropout{i}', nn.Dropout(p=args.dropout))
   model.add_module('output', nn.Linear(hidden_layer_sizes[-1],p))
   return model
 
@@ -179,7 +191,7 @@ p = 10
 
 model = mlp(n , p , hidden_layer_sizes , num_hidden_layers)
 loss_fn = nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=args.weight_decay)
 
 train(model , optimizer , loss_fn)
 
