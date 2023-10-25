@@ -9,6 +9,7 @@ import torch
 import torchvision.transforms as T
 import torchvision
 import torch.nn as nn
+import random
 
 import argparse
 parser = argparse.ArgumentParser()
@@ -29,20 +30,22 @@ wandb.login()
 
 parser.add_argument("--weight_decay", type=float, default=0.0)
 parser.add_argument("--dropout", type=float, default=0.0)
+parser.add_argument("--noise", type=float, default=0.0)
 args = parser.parse_args()
 print(args)
 
 learning_rate = 0.001
-epochs = 90
+epochs = 1000
 num_hidden_layers = 3
-hidden_layer_sizes = [int(1000//args.dropout),int(800//args.dropout),int(800//args.dropout)]
-print(hidden_layer_sizes)
+# hidden_layer_sizes = [int(1000//(1-args.dropout)),int(800//(1-args.dropout)),int(800//(1-args.dropout))]
+hidden_layer_sizes = [1000,800,800]
 optimizer = "Adam"
 loss = "cross-entropy"
 architecture = "MLP"
 run = "1"
 dataset = "CIFAR-10"
 batch_size = 32
+noise = 0.0
 
 
 wandb.init(
@@ -60,7 +63,8 @@ wandb.init(
     "loss":loss,
     "batch_size":batch_size,
     "weight_decay":args.weight_decay,
-    "dropout":args.dropout
+    "dropout":args.dropout,
+    "noise":args.noise
     })
 
 
@@ -93,6 +97,14 @@ test_transform = T.Compose([
 # Load the dataset
 trainset = torchvision.datasets.CIFAR10(root='./cifar10', train=True,
                                         download=True, transform=train_transform)
+
+# Add noise to the dataset
+if args.noise > 0:
+  lendataset = len(trainset.targets)
+  indices = torch.randint(0,lendataset,(int(args.noise*(lendataset)),))
+  for index in indices:
+      trainset.targets[index] = random.randint(0,9)
+
 trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size,
                                           shuffle=True, num_workers=1)
 
