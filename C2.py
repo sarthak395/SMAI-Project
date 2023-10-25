@@ -206,15 +206,6 @@ def train(model , optimiser , loss_fn):
             # Forward pass: compute predicted y by passing x to the model.
             preds = model(x)
             loss = loss_fn(preds, y)
-
-            # Early stopping
-            if args.early_stopping:
-                early_stopping.early_stop(loss)
-                if early_stopping.early_stop:
-                    print("Early stopping")
-                    print(f"Epoch Number: {epoch+1}")
-                    print(f"Early Stopping Validation Loss: {loss}")
-                    break
             
             # Zero gradients, perform a backward pass, and update the weights.
             optimiser.zero_grad()
@@ -224,6 +215,14 @@ def train(model , optimiser , loss_fn):
         # logging the loss and accuracy for each epoch
         acc,loss = val_check_accuracy(testloader ,model,loss_fn)
         wandb.log({"val loss": loss, "val accuracy": acc})
+        # Early stopping
+        if args.early_stopping:
+            early_stopping.early_stop(loss)
+            if early_stopping.early_stop:
+                print("Early stopping")
+                print(f"Epoch Number: {epoch+1}")
+                print(f"Early Stopping Validation Loss: {loss}")
+                break
         trainacc , trainloss = val_check_accuracy(trainloader,model,loss_fn)
         wandb.log({"train loss": trainloss, "train accuracy": trainacc})
         print(f"Epoch {epoch+1} : train loss : {trainloss} train accuracy : {trainacc} val loss : {loss} val accuracy : {acc}")
