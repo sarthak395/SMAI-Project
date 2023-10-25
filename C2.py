@@ -66,7 +66,8 @@ wandb.init(
     "batch_size":batch_size,
     "weight_decay":args.weight_decay,
     "dropout":args.dropout,
-    "noise":args.noise
+    "noise":args.noise,
+    "early_stopping":args.early_stopping,
     })
 
 
@@ -180,7 +181,7 @@ class EarlyStopping:
         self.val_loss_min = np.Inf
         self.delta = delta
 
-    def early_stop(self, curr_val_loss):
+    def early_stop_fn(self, curr_val_loss):
         score = -curr_val_loss
         if self.best_score is None:
             self.best_score = score
@@ -217,7 +218,7 @@ def train(model , optimiser , loss_fn):
         wandb.log({"val loss": loss, "val accuracy": acc})
         # Early stopping
         if args.early_stopping:
-            early_stopping.early_stop(loss)
+            early_stopping.early_stop_fn(loss)
             if early_stopping.early_stop:
                 print("Early stopping")
                 print(f"Epoch Number: {epoch+1}")
