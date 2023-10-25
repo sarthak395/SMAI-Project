@@ -10,6 +10,7 @@ import torchvision.transforms as T
 import torchvision
 import torch.nn as nn
 import random
+import numpy as np
 
 import argparse
 parser = argparse.ArgumentParser()
@@ -31,6 +32,7 @@ wandb.login()
 parser.add_argument("--weight_decay", type=float, default=0.0)
 parser.add_argument("--dropout", type=float, default=0.0)
 parser.add_argument("--noise", type=float, default=0.0)
+parser.add_argument("--early_stopping", type=bool, default=False)
 args = parser.parse_args()
 print(args)
 
@@ -169,6 +171,29 @@ def val_check_accuracy(data,model,loss_fn):
 
 # In[16]:
 
+class EarlyStopping:
+    def __init__(self, patience=10, delta=0):
+        self.patience = patience
+        self.counter = 0
+        self.best_score = None
+        self.early_stop = False
+        self.val_loss_min = np.Inf
+        self.delta = delta
+
+    def early_stop(self, curr_val_loss):
+        score = -curr_val_loss
+        if self.best_score is None:
+            self.best_score = score
+        elif score < self.best_score + self.delta:
+            self.counter += 1
+            if self.counter >= self.patience:
+                self.early_stop = True
+        else:
+            self.best_score = score
+            self.counter = 0
+
+early_stopping = EarlyStopping(patience=10, delta=0.001)     
+
 
 def train(model , optimiser , loss_fn):
     for epoch in range(epochs):
@@ -181,6 +206,15 @@ def train(model , optimiser , loss_fn):
             # Forward pass: compute predicted y by passing x to the model.
             preds = model(x)
             loss = loss_fn(preds, y)
+
+            # Early stopping
+            if args.early_stopping:
+                early_stopping.early_stop(loss)
+                if early_stopping.early_stop:
+                    print("Early stopping")
+                    print(f"Epoch Number: {epoch+1}")
+                    print(f"Early Stopping Validation Loss: {loss}")
+                    break
             
             # Zero gradients, perform a backward pass, and update the weights.
             optimiser.zero_grad()
