@@ -33,6 +33,13 @@ parser.add_argument("--weight_decay", type=float, default=0.0)
 parser.add_argument("--dropout", type=float, default=0.0)
 parser.add_argument("--noise", type=float, default=0.0)
 parser.add_argument("--early_stopping", type=bool, default=False)
+parser.add_argument("--early_stopping_delta", type=float, default=0.001)
+parser.add_argument("--early_stopping_patience", type=int, default=10)
+parser.add_argument("--architecture" , default="MLP")
+parser.add_argument("--num_convblocks" , type=int , default=3)
+parser.add_argument("--input_size" , type=int , default=32)
+parser.add_argument("--num_classes" , type=int , default=10)
+
 args = parser.parse_args()
 print(args)
 
@@ -43,16 +50,17 @@ num_hidden_layers = 3
 hidden_layer_sizes = [1000,800,800]
 optimizer = "Adam"
 loss = "cross-entropy"
-architecture = "MLP"
+architecture = args.architecture
 run = "1"
 dataset = "CIFAR-10"
 batch_size = 32
-noise = 0.0
+noise = args.noise
+
 
 
 wandb.init(
     project="SMAI-Project", 
-    name=f"experiment_{architecture}_{dataset} {run}",
+    name=f"experiment_{architecture}_{dataset}",
     # Track hyperparameters and run metadata
     config={
     "learning_rate": learning_rate,
@@ -68,6 +76,11 @@ wandb.init(
     "dropout":args.dropout,
     "noise":args.noise,
     "early_stopping":args.early_stopping,
+    "early_stopping_delta":args.early_stopping_delta,
+    "early_stopping_patience":args.early_stopping_patience,
+    "num_convblocks":args.num_convblocks,
+    "input_size":args.input_size,
+    "num_classes":args.num_classes
     })
 
 
@@ -145,6 +158,34 @@ def mlp( n , p , hidden_layer_sizes , num_hidden_layers):
   model.add_module('output', nn.Linear(hidden_layer_sizes[-1],p))
   return model
 
+def AlexNet(input_size = 32 , num_classes =  10 , dropout = 0.5 , num_convblocks = 3):
+    model = nn.Sequential()
+    # model.add_module('conv1',nn.Conv2d(3,64,kernel_size=3,stride=1,padding=1)) # (input_size , input_size , 3) -> (input_size , input_size , 64)
+    # model.add_module('relu1',nn.ReLU())
+    model.add_module('convblock0' , nn.Sequential(
+        nn.Conv2d(3,64,kernel_size=3,stride=1,padding=1) , 
+        nn.ReLU() , 
+        nn.MaxPool2d(kernel_size=2,stride=2) , # (input_size , input_size , 64) -> (input_size/2 , input_size/2 , 64)
+    ))
+
+    assert(num_convblocks > 0)
+    assert(input_size % (2**num_convblocks) == 0) 
+
+    for i in range(1,num_convblocks):
+        model.add_module(f'convblock{i}' , nn.Sequential(
+            nn.Conv2d(64*(2**(i-1)),64*(2**i),kernel_size=3,stride=1,padding=1) , 
+            nn.ReLU() , 
+            nn.MaxPool2d(kernel_size=2,stride=2) , # (input_size , input_size , 64*(2**(i-1))) -> (input_size/2 , input_size/2 , 64 * (2**i)))
+        ))
+    
+    model.add_module('flatten' , nn.Flatten()) # (input_size/(2**num_convblocks) , input_size/(2**num_convblocks) , 64 * (2**(numblocks-1))) -> (input_size/(2**num_convblocks) * input_size/(2**num_convblocks) * 64 * (2**(numblocks-1)))
+    model.add_module('dropout' , nn.Dropout(dropout))
+    model.add_module('fc1' , nn.Linear(((input_size//(2**num_convblocks))**2 )*64 * (2**(num_convblocks-1))  , 128))
+    model.add_module('relu1' , nn.ReLU())
+    model.add_module('fc2' , nn.Linear(128 , num_classes))
+    return model
+
+
 
 # In[17]:
 
@@ -156,7 +197,8 @@ def val_check_accuracy(data,model,loss_fn):
   totalloss = 0
   with torch.no_grad():
     for x,y in data:
-      x = flatten(x)
+      if args.architecture == "MLP":
+            x = flatten(x)
       x = x.to(dtype=dtype,device=device)
       y = y.to(dtype=torch.long,device=device)
       scores = model(x)
@@ -193,7 +235,7 @@ class EarlyStopping:
             self.best_score = score
             self.counter = 0
 
-early_stopping = EarlyStopping(patience=10, delta=0.001)     
+early_stopping = EarlyStopping(patience=args.early_stopping_patience, delta=args.early_stopping_delta)     
 
 
 def train(model , optimiser , loss_fn):
@@ -202,7 +244,8 @@ def train(model , optimiser , loss_fn):
         for t,(x,y) in enumerate(trainloader):
             x = x.to(device)
             y = y.to(device , dtype=torch.long)
-            x = flatten(x)
+            if args.architecture == "MLP":
+                x = flatten(x)
 
             # Forward pass: compute predicted y by passing x to the model.
             preds = model(x)
@@ -235,7 +278,13 @@ def train(model , optimiser , loss_fn):
 n = 3*32*32
 p = 10
 
-model = mlp(n , p , hidden_layer_sizes , num_hidden_layers)
+if args.architecture == "MLP":
+    model = mlp(n , p , hidden_layer_sizes , num_hidden_layers)
+elif args.architecture == "AlexNet":
+   model = AlexNet(input_size = args.input_size , num_classes = args.num_classes , dropout = args.dropout , num_convblocks = args.num_convblocks)
+else:
+    raise Exception("Invalid Architecture")
+
 loss_fn = nn.CrossEntropyLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=args.weight_decay)
 
