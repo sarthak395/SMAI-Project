@@ -39,11 +39,12 @@ parser.add_argument("--architecture" , default="MLP")
 parser.add_argument("--num_convblocks" , type=int , default=3)
 parser.add_argument("--input_size" , type=int , default=32)
 parser.add_argument("--num_classes" , type=int , default=10)
+parser.add_argument("--lr" , type=float , default=0.0001)
 
 args = parser.parse_args()
 print(args)
 
-learning_rate = 0.001
+learning_rate = args.lr
 epochs = 1000
 num_hidden_layers = 3
 # hidden_layer_sizes = [int(1000//(1-args.dropout)),int(800//(1-args.dropout)),int(800//(1-args.dropout))]
