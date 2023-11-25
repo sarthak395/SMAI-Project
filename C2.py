@@ -40,12 +40,17 @@ parser.add_argument("--num_convblocks" , type=int , default=3)
 parser.add_argument("--input_size" , type=int , default=32)
 parser.add_argument("--num_classes" , type=int , default=10)
 parser.add_argument("--lr" , type=float , default=0.0001)
+parser.add_argument("--dataset" , type=str , default="CIFAR-10")
+parser.add_argument("--gaussian_noise" , type=bool , default=False)
+parser.add_argument("--random_pixels" , type=bool , default=False)
+parser.add_argument("--shuffled_pixels" , type=bool , default=False)
+parser.add_argument("--IOC" , default=False)
 
 args = parser.parse_args()
 print(args)
 
 learning_rate = args.lr
-epochs = 1000
+epochs = 200
 num_hidden_layers = 3
 # hidden_layer_sizes = [int(1000//(1-args.dropout)),int(800//(1-args.dropout)),int(800//(1-args.dropout))]
 hidden_layer_sizes = [1000,800,800]
@@ -53,11 +58,12 @@ optimizer = "Adam"
 loss = "cross-entropy"
 architecture = args.architecture
 run = "1"
-dataset = "CIFAR-10"
+dataset = args.dataset
 batch_size = 32
 noise = args.noise
-
-
+gaussian_noise = args.gaussian_noise
+random_pixels = args.random_pixels
+shuffled_pixels = args.shuffled_pixels
 
 wandb.init(
     project="SMAI-Project", 
@@ -81,7 +87,11 @@ wandb.init(
     "early_stopping_patience":args.early_stopping_patience,
     "num_convblocks":args.num_convblocks,
     "input_size":args.input_size,
-    "num_classes":args.num_classes
+    "num_classes":args.num_classes,
+    "gaussian_noise":args.gaussian_noise,
+    "random_pixels":args.random_pixels,
+    "shuffled_pixels":args.shuffled_pixels,
+    "IOC":args.IOC
     })
 
 
@@ -112,7 +122,11 @@ test_transform = T.Compose([
 ])
 
 # Load the dataset
-trainset = torchvision.datasets.CIFAR10(root='./cifar10', train=True,
+if args.dataset == "CIFAR-100":
+    trainset = torchvision.datasets.CIFAR100(root='./cifar100', train=True,
+                                        download=True, transform=train_transform)
+else :
+    trainset = torchvision.datasets.CIFAR10(root='./cifar10', train=True,
                                         download=True, transform=train_transform)
 
 # Add noise to the dataset
@@ -121,12 +135,37 @@ if args.noise > 0:
   indices = torch.randint(0,lendataset,(int(args.noise*(lendataset)),))
   for index in indices:
       trainset.targets[index] = random.randint(0,9)
+    
+if args.gaussian_noise:
+    # for the entire training set , use the mean and variance to generate random pixels for each image
+    mean = [0.4914, 0.4822, 0.4465]
+    variance = [0.247, 0.243, 0.261]
+    for i in range(len(trainset.data)):
+        for j in range(3):
+            trainset.data[i][j] = np.random.normal(mean[j],variance[j])
+
+if args.random_pixels:
+    # for the entire training set , shuffle the pixels of each image
+    for i in range(len(trainset.data)):
+        np.random.shuffle(trainset.data[i])
+
+if args.shuffled_pixels:
+    # take a common permutation and then shuffle according to that
+    perm = np.random.permutation(32*32)
+    for i in range(len(trainset.data)):
+        trainset.data[i] = trainset.data[i].reshape(32*32,3)[perm].reshape(32,32,3)
+
 
 trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size,
                                           shuffle=True, num_workers=1)
 
-testset = torchvision.datasets.CIFAR10(root='./cifar10', train=False,
+if args.dataset == "CIFAR-100":
+    testset = torchvision.datasets.CIFAR100(root='./cifar100', train=False,
                                        download=True, transform=test_transform)
+else :
+    testset = torchvision.datasets.CIFAR10(root='./cifar10', train=False,
+                                       download=True, transform=test_transform)
+    
 testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size,
                                          shuffle=False, num_workers=1)
 
@@ -154,7 +193,11 @@ def mlp( n , p , hidden_layer_sizes , num_hidden_layers):
   model.add_module('dropout0', nn.Dropout(p=args.dropout))
   for i in range(1,num_hidden_layers):
     model.add_module(f'hidden{i}', nn.Linear(hidden_layer_sizes[i-1],hidden_layer_sizes[i]))
-    model.add_module(f'relu{i}', nn.ReLU())
+    if args.IOC:
+        model.add_module(f'batchnorm{i}', nn.BatchNorm1d(hidden_layer_sizes[i]))
+        model.add_module(f'elu{i}', nn.ELU())
+    else:
+        model.add_module(f'relu{i}', nn.ReLU())
     model.add_module(f'dropout{i}', nn.Dropout(p=args.dropout))
   model.add_module('output', nn.Linear(hidden_layer_sizes[-1],p))
   return model
@@ -163,6 +206,7 @@ def AlexNet(input_size = 32 , num_classes =  10 , dropout = 0.5 , num_convblocks
     model = nn.Sequential()
     # model.add_module('conv1',nn.Conv2d(3,64,kernel_size=3,stride=1,padding=1)) # (input_size , input_size , 3) -> (input_size , input_size , 64)
     # model.add_module('relu1',nn.ReLU())
+
     model.add_module('convblock0' , nn.Sequential(
         nn.Conv2d(3,64,kernel_size=3,stride=1,padding=1) , 
         nn.ReLU() , 
@@ -178,6 +222,7 @@ def AlexNet(input_size = 32 , num_classes =  10 , dropout = 0.5 , num_convblocks
             nn.ReLU() , 
             nn.MaxPool2d(kernel_size=2,stride=2) , # (input_size , input_size , 64*(2**(i-1))) -> (input_size/2 , input_size/2 , 64 * (2**i)))
         ))
+        
     
     model.add_module('flatten' , nn.Flatten()) # (input_size/(2**num_convblocks) , input_size/(2**num_convblocks) , 64 * (2**(numblocks-1))) -> (input_size/(2**num_convblocks) * input_size/(2**num_convblocks) * 64 * (2**(numblocks-1)))
     model.add_module('dropout' , nn.Dropout(dropout))
@@ -257,6 +302,13 @@ def train(model , optimiser , loss_fn):
             loss.backward()
             optimiser.step()
 
+            if args.IOC:
+                with torch.no_grad():
+                    for i in range(num_hidden_layers):
+                        param_w = model[(i+1)*3].weight
+                        indices_w = torch.where(param_w < 0)
+                        model[(i+1)*3].weight[indices_w] = torch.exp(param_w[indices_w] - 5)
+
         # logging the loss and accuracy for each epoch
         acc,loss = val_check_accuracy(testloader ,model,loss_fn)
         wandb.log({"val loss": loss, "val accuracy": acc})
@@ -277,7 +329,7 @@ def train(model , optimiser , loss_fn):
 
 
 n = 3*32*32
-p = 10
+p = args.num_classes
 
 if args.architecture == "MLP":
     model = mlp(n , p , hidden_layer_sizes , num_hidden_layers)
