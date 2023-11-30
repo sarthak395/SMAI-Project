@@ -3,7 +3,7 @@
 
 # In[8]:
 
-
+''' All required imports '''
 import wandb
 import torch
 import torchvision.transforms as T
@@ -29,6 +29,7 @@ wandb.login()
 
 # In[4]:
 
+''' All the arguments are being passed through argparser'''
 parser.add_argument("--weight_decay", type=float, default=0.0)
 parser.add_argument("--dropout", type=float, default=0.0)
 parser.add_argument("--noise", type=float, default=0.0)
@@ -49,6 +50,7 @@ parser.add_argument("--IOC" , default=False)
 args = parser.parse_args()
 print(args)
 
+''' Assigning the arguments to the variables '''
 learning_rate = args.lr
 epochs = 200
 num_hidden_layers = 3
@@ -65,10 +67,11 @@ gaussian_noise = args.gaussian_noise
 random_pixels = args.random_pixels
 shuffled_pixels = args.shuffled_pixels
 
+''' Initializing the wandb run '''
 wandb.init(
     project="SMAI-Project", 
     name=f"experiment_{architecture}_{dataset}",
-    # Track hyperparameters and run metadata
+    # Tracking hyperparameters and run metadata
     config={
     "learning_rate": learning_rate,
     "architecture": architecture,
@@ -97,7 +100,7 @@ wandb.init(
 
 # In[5]:
 
-
+''' Setting the device to cuda if available else cpu'''
 device = torch.device('cpu')
 if torch.cuda.is_available():
   device = torch.device('cuda')
@@ -109,19 +112,19 @@ dtype = torch.float32
 
 
 # Cite : https://pytorch.org/tutorials/beginner/blitz/cifar10_tutorial.html
-# Some Data Augmentation
+''' Some Data Augmentation '''
 train_transform = T.Compose([
                 T.RandomCrop(32,padding=4),
                 T.RandomHorizontalFlip(),
                 T.ToTensor(),
-                T.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261)), # mean values and stds of RGB channels on cifar10
+                T.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261)), # Mean values and stdevs of RGB channels on cifar10
             ])
 test_transform = T.Compose([
     T.ToTensor(),
-    T.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261)) # mean values and stds of RGB channels om cifar10
+    T.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261)) # Mean values and stdevs of RGB channels of cifar10
 ])
 
-# Load the dataset
+''' Loading the dataset '''
 if args.dataset == "CIFAR-100":
     trainset = torchvision.datasets.CIFAR100(root='./cifar100', train=True,
                                         download=True, transform=train_transform)
@@ -129,13 +132,16 @@ else :
     trainset = torchvision.datasets.CIFAR10(root='./cifar10', train=True,
                                         download=True, transform=train_transform)
 
-# Add noise to the dataset
+''' Adding noise to the dataset '''
+
+'''Label Noise: Labels have been randomly assigned to the images'''
 if args.noise > 0:
   lendataset = len(trainset.targets)
   indices = torch.randint(0,lendataset,(int(args.noise*(lendataset)),))
   for index in indices:
       trainset.targets[index] = random.randint(0,9)
     
+''' Gaussian Noise: Pixels have been assigned random values from a gaussian distribution with mean and variance of the dataset '''
 if args.gaussian_noise:
     # for the entire training set , use the mean and variance to generate random pixels for each image
     mean = [0.4914, 0.4822, 0.4465]
@@ -144,11 +150,13 @@ if args.gaussian_noise:
         for j in range(3):
             trainset.data[i][j] = np.random.normal(mean[j],variance[j])
 
+''' Random Pixels: Pixels in the image have been shuffled according to different random permutations for each image'''
 if args.random_pixels:
     # for the entire training set , shuffle the pixels of each image
     for i in range(len(trainset.data)):
         np.random.shuffle(trainset.data[i])
 
+''' Shuffled Pixels: Pixels in the image have been shuffled according to a common random permutation for each image'''
 if args.shuffled_pixels:
     # take a common permutation and then shuffle according to that
     perm = np.random.permutation(32*32)
@@ -184,7 +192,7 @@ def flatten(x):
 
 # In[11]:
 
-
+''' Defining a 3-layered MLP model with ReLU activation function. Dropout has been induced here (default probability is 0) '''
 def mlp( n , p , hidden_layer_sizes , num_hidden_layers):
   '''n is the input features and p is the number of classes'''
   model = nn.Sequential()
@@ -193,6 +201,7 @@ def mlp( n , p , hidden_layer_sizes , num_hidden_layers):
   model.add_module('dropout0', nn.Dropout(p=args.dropout))
   for i in range(1,num_hidden_layers):
     model.add_module(f'hidden{i}', nn.Linear(hidden_layer_sizes[i-1],hidden_layer_sizes[i]))
+    ''' IOC: BatchNorm and ELU instead of ReLU'''
     if args.IOC:
         model.add_module(f'batchnorm{i}', nn.BatchNorm1d(hidden_layer_sizes[i]))
         model.add_module(f'elu{i}', nn.ELU())
@@ -202,11 +211,13 @@ def mlp( n , p , hidden_layer_sizes , num_hidden_layers):
   model.add_module('output', nn.Linear(hidden_layer_sizes[-1],p))
   return model
 
+''' Defining a CNN model with ReLU activation function. Default number of convolutional layers and fully-connected layers is 3 and 2, repectively. Dropout has been induced here'''
 def AlexNet(input_size = 32 , num_classes =  10 , dropout = 0.5 , num_convblocks = 3):
     model = nn.Sequential()
     # model.add_module('conv1',nn.Conv2d(3,64,kernel_size=3,stride=1,padding=1)) # (input_size , input_size , 3) -> (input_size , input_size , 64)
     # model.add_module('relu1',nn.ReLU())
 
+    ''' Convolutional Layers '''
     model.add_module('convblock0' , nn.Sequential(
         nn.Conv2d(3,64,kernel_size=3,stride=1,padding=1) , 
         nn.ReLU() , 
@@ -223,7 +234,7 @@ def AlexNet(input_size = 32 , num_classes =  10 , dropout = 0.5 , num_convblocks
             nn.MaxPool2d(kernel_size=2,stride=2) , # (input_size , input_size , 64*(2**(i-1))) -> (input_size/2 , input_size/2 , 64 * (2**i)))
         ))
         
-    
+    ''' Fully Connected Layers'''
     model.add_module('flatten' , nn.Flatten()) # (input_size/(2**num_convblocks) , input_size/(2**num_convblocks) , 64 * (2**(numblocks-1))) -> (input_size/(2**num_convblocks) * input_size/(2**num_convblocks) * 64 * (2**(numblocks-1)))
     model.add_module('dropout' , nn.Dropout(dropout))
     model.add_module('fc1' , nn.Linear(((input_size//(2**num_convblocks))**2 )*64 * (2**(num_convblocks-1))  , 128))
@@ -235,7 +246,7 @@ def AlexNet(input_size = 32 , num_classes =  10 , dropout = 0.5 , num_convblocks
 
 # In[17]:
 
-
+''' Function to check the accuracy of the model on the validation set'''''
 def val_check_accuracy(data,model,loss_fn):
   num_samples = 0
   num_correct = 0
@@ -260,6 +271,7 @@ def val_check_accuracy(data,model,loss_fn):
 
 # In[16]:
 
+''' Early Stopping class implementation with default delta value as 0 and default patience of 10 iterations'''
 class EarlyStopping:
     def __init__(self, patience=10, delta=0):
         self.patience = patience
@@ -283,17 +295,17 @@ class EarlyStopping:
 
 early_stopping = EarlyStopping(patience=args.early_stopping_patience, delta=args.early_stopping_delta)     
 
-
+''' Training the model '''
 def train(model , optimiser , loss_fn):
     for epoch in range(epochs):
-        model = model.to(device) # moving model on cuda
+        model = model.to(device) # Moving model on cuda
         for t,(x,y) in enumerate(trainloader):
             x = x.to(device)
             y = y.to(device , dtype=torch.long)
             if args.architecture == "MLP":
                 x = flatten(x)
 
-            # Forward pass: compute predicted y by passing x to the model.
+            # Forward pass: Computing predicted y by passing x to the model.
             preds = model(x)
             loss = loss_fn(preds, y)
             
@@ -302,6 +314,7 @@ def train(model , optimiser , loss_fn):
             loss.backward()
             optimiser.step()
 
+            ''' In case of IOC: Ensuring the weights are positive(required condition). Thus, if a negative weight is encountered, it is replaced by exp(weight - 5), making it positive'''
             if args.IOC:
                 with torch.no_grad():
                     for i in range(num_hidden_layers):
@@ -309,10 +322,11 @@ def train(model , optimiser , loss_fn):
                         indices_w = torch.where(param_w < 0)
                         model[(i+1)*3].weight[indices_w] = torch.exp(param_w[indices_w] - 5)
 
-        # logging the loss and accuracy for each epoch
+        # Logging the loss and accuracy for each epoch
         acc,loss = val_check_accuracy(testloader ,model,loss_fn)
         wandb.log({"val loss": loss, "val accuracy": acc})
-        # Early stopping
+
+        ''' Early stopping '''
         if args.early_stopping:
             early_stopping.early_stop_fn(loss)
             if early_stopping.early_stop:
@@ -338,6 +352,7 @@ elif args.architecture == "AlexNet":
 else:
     raise Exception("Invalid Architecture")
 
+''' Cross Entropy Loss function and Adam Optimizer '''
 loss_fn = nn.CrossEntropyLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=args.weight_decay)
 
